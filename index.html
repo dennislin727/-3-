@@ -1,0 +1,615 @@
+
+<style>
+  :root {
+    --spin-dur: 4s;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-sans, sans-serif); }
+
+  #app { padding: 1.5rem 1rem 2rem; }
+
+  .tab-row {
+    display: flex; gap: 8px; margin-bottom: 1.5rem;
+  }
+  .tab-btn {
+    flex: 1; padding: 10px 0; border-radius: var(--border-radius-lg);
+    border: 0.5px solid var(--color-border-secondary);
+    background: var(--color-background-secondary);
+    color: var(--color-text-secondary); font-size: 15px; font-weight: 500; cursor: pointer;
+    transition: all 0.18s;
+  }
+  .tab-btn.active {
+    background: var(--color-text-primary); color: var(--color-background-primary);
+    border-color: var(--color-text-primary);
+  }
+
+  .wheel-wrap {
+    display: flex; flex-direction: column; align-items: center; gap: 1.5rem;
+  }
+
+  .wheel-outer {
+    position: relative; width: 300px; height: 300px;
+  }
+  .pointer {
+    position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 14px solid transparent;
+    border-right: 14px solid transparent;
+    border-top: 28px solid var(--color-text-primary);
+    z-index: 10;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+  }
+  canvas#wheel {
+    width: 300px; height: 300px; border-radius: 50%;
+    display: block;
+  }
+  .center-btn {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 64px; height: 64px; border-radius: 50%;
+    background: var(--color-background-primary);
+    border: 3px solid var(--color-border-primary);
+    color: var(--color-text-primary); font-size: 12px; font-weight: 500;
+    cursor: pointer; z-index: 5;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    line-height: 1.3;
+    transition: transform 0.1s, background 0.15s;
+  }
+  .center-btn:hover { background: var(--color-background-secondary); }
+  .center-btn:active { transform: translate(-50%,-50%) scale(0.94); }
+  .center-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .result-card {
+    width: 100%; max-width: 420px;
+    background: var(--color-background-primary);
+    border: 0.5px solid var(--color-border-secondary);
+    border-radius: var(--border-radius-lg);
+    padding: 1.25rem 1.5rem;
+    display: none;
+  }
+  .result-card.show { display: block; }
+  .result-name {
+    font-size: 20px; font-weight: 500;
+    color: var(--color-text-primary); margin-bottom: 0.5rem;
+  }
+  .result-status {
+    font-size: 13px; margin-bottom: 1rem; padding: 6px 12px;
+    border-radius: var(--border-radius-md); display: inline-block; font-weight: 500;
+  }
+  .status-open { background: #EAF3DE; color: #3B6D11; }
+  .status-closed { background: #FCEBEB; color: #A32D2D; }
+  .result-info { font-size: 13px; color: var(--color-text-secondary); margin-bottom: 8px; line-height: 1.6; }
+  .result-info strong { color: var(--color-text-primary); }
+  .result-actions { display: flex; gap: 8px; margin-top: 1rem; flex-wrap: wrap; }
+  .action-btn {
+    padding: 8px 16px; border-radius: var(--border-radius-md);
+    border: 0.5px solid var(--color-border-secondary);
+    background: var(--color-background-secondary);
+    color: var(--color-text-primary); font-size: 13px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .action-btn:hover { background: var(--color-background-tertiary); }
+  .action-btn.primary {
+    background: var(--color-text-primary); color: var(--color-background-primary);
+    border-color: var(--color-text-primary);
+  }
+  .action-btn.primary:hover { opacity: 0.85; }
+
+  .removed-list {
+    width: 100%; max-width: 420px;
+    font-size: 12px; color: var(--color-text-secondary);
+    margin-top: 0.5rem; min-height: 20px;
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  }
+  .removed-tag {
+    background: var(--color-background-secondary);
+    border: 0.5px solid var(--color-border-tertiary);
+    border-radius: 99px; padding: 2px 10px; font-size: 12px;
+    color: var(--color-text-secondary); text-decoration: line-through;
+  }
+
+  .map-link { color: var(--color-text-info); text-decoration: none; }
+  .map-link:hover { text-decoration: underline; }
+</style>
+
+<div id="app">
+  <h2 class="sr-only">永和美食轉盤 — 幫你決定吃什麼</h2>
+  <div class="tab-row">
+    <button class="tab-btn active" onclick="setMode('meal')" id="tab-meal">正餐</button>
+    <button class="tab-btn" onclick="setMode('breakfast')" id="tab-breakfast">早餐</button>
+  </div>
+  <div class="wheel-wrap">
+    <div class="wheel-outer">
+      <div class="pointer"></div>
+      <canvas id="wheel" width="300" height="300"></canvas>
+      <button class="center-btn" id="spinBtn" onclick="spin()">轉！</button>
+    </div>
+    <div class="result-card" id="resultCard">
+      <div class="result-name" id="resultName"></div>
+      <span class="result-status" id="resultStatus"></span>
+      <div class="result-info" id="resultInfo"></div>
+      <div class="result-actions" id="resultActions"></div>
+    </div>
+    <div class="removed-list" id="removedList"></div>
+  </div>
+</div>
+
+<script>
+const RESTAURANTS = {
+  meal: [
+    {
+      name: "大無敵烤肉飯",
+      closedDays: [],
+      hours: [{ open: "10:30", close: "20:30" }],
+      phone: "+886 2 8925 0960",
+      address: "新北市永和區竹林路237號",
+      mapUrl: "https://maps.app.goo.gl/DhZQmDSekC2vAuUA8",
+      note: "烤肉飯、烤雞腿，免費湯飲"
+    },
+    {
+      name: "京味鮮自助餐",
+      closedDays: [],
+      hours: [{ open: "10:00", close: "14:00" }, { open: "16:00", close: "21:00" }],
+      phone: "+886 2 2231 2677",
+      address: "新北市永和區永貞路37號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "自助餐，紫米飯可選，白飯無限續"
+    },
+    {
+      name: "千達拉麵",
+      closedDays: [1],
+      hours: [{ open: "11:30", close: "14:00" }, { open: "17:00", close: "21:00" }],
+      phone: "+886 2 2926 7010",
+      address: "新北市永和區大新街21號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "現熬湯頭，免費加麵，週一休息"
+    },
+    {
+      name: "外島兵湖南牛肉麵",
+      closedDays: [1, 5],
+      hours: [{ open: "11:00", close: "21:00" }],
+      phone: "+886 983 325 585",
+      address: "新北市永和區大新街69巷2號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "周一、五公休，牛肉塊大份量足"
+    },
+    {
+      name: "赤發海南雞",
+      closedDays: [1],
+      hours: [{ open: "11:30", close: "14:00" }, { open: "16:30", close: "20:30" }],
+      phone: "+886 2 8925 0130",
+      address: "新北市永和區竹林路219號1樓",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "海南雞飯、肉骨茶，週一公休"
+    },
+    {
+      name: "金春發牛肉",
+      closedDays: [1],
+      hours: [{ open: "11:15", close: "14:30" }, { open: "17:00", close: "20:30" }],
+      phone: "+886 2 2933 7886",
+      address: "新北市永和區永利路45號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "清燉牛肉麵、咖哩炒牛肉，週一公休"
+    },
+    {
+      name: "滇泰小廚",
+      closedDays: [2],
+      hours: [{ open: "11:30", close: "14:30" }, { open: "17:00", close: "21:00" }],
+      phone: "+886 2 2922 0018",
+      address: "新北市永和區永利路1號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "泰式料理，週二公休"
+    },
+    {
+      name: "泰皇泰式",
+      closedDays: [2, 3, 0],
+      hours: [{ open: "11:30", close: "20:30" }],
+      phone: "+886 2 8925 0970",
+      address: "新北市永和區福和路80號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "泰式小吃，週二三日公休"
+    },
+    {
+      name: "頤玉湯包",
+      closedDays: [],
+      hours: [{ open: "00:00", close: "23:59" }],
+      phone: "+886 2 8660 6638",
+      address: "新北市永和區中正路650號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "24小時營業，小籠包、蝦餃必點"
+    },
+    {
+      name: "加樂滷味",
+      closedDays: [5],
+      hours: [{ open: "17:00", close: "00:00" }],
+      phone: "+886 922 511 211",
+      address: "新北市永和區福和路74號1樓",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "滷味，週五公休，常提早售完"
+    },
+    {
+      name: "日嚐",
+      closedDays: [2],
+      hours: [{ open: "17:00", close: "01:00" }],
+      phone: "+886 2 8921 0700",
+      address: "新北市永和區永貞路38號1樓",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "日式居酒屋，生魚片、烤魚，週二公休"
+    },
+    {
+      name: "港式荃灣燒臘",
+      closedDays: [0],
+      hours: [{ open: "11:00", close: "14:00" }, { open: "17:00", close: "20:00" }],
+      phone: "+886 919 471 719",
+      address: "新北市永和區國光路49巷4號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "港式燒臘，週日公休"
+    },
+    {
+      name: "松和丼飯",
+      closedDays: [1, 6],
+      hours: [{ open: "11:30", close: "14:00" }, { open: "17:30", close: "20:30" }],
+      phone: "+886 2 2211 3320",
+      address: "新北市永和區德和路373巷5號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "日式丼飯，週一六公休"
+    },
+    {
+      name: "永福麵食館",
+      closedDays: [6],
+      hours: [{ open: "11:00", close: "14:00" }, { open: "17:00", close: "20:30" }],
+      phone: "+886 2 8660 1006",
+      address: "新北市永和區福和路57巷4弄1號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "麻醬麵、雙醬麵，週六公休"
+    },
+    {
+      name: "TNT牛排",
+      closedDays: [],
+      hours: [{ open: "11:30", close: "14:30" }, { open: "17:30", close: "22:00" }],
+      phone: "+886 2 2926 2226",
+      address: "新北市永和區永衡路69號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "美式炭烤牛排，飲料無限續"
+    },
+    {
+      name: "樂檸義麵屋",
+      closedDays: [],
+      hours: [{ open: "12:00", close: "14:00" }, { open: "17:00", close: "20:00" }],
+      phone: "+886 2 2921 5252",
+      address: "新北市永和區福和路57巷4弄2號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "義大利麵，紅茶無限暢飲"
+    },
+    {
+      name: "福勝亭",
+      closedDays: [],
+      hours: [{ open: "11:00", close: "21:00" }],
+      phone: "+886 2 8926 3068",
+      address: "新北市永和區竹林路239號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "日式豬排，2F有冷氣"
+    },
+    {
+      name: "良鼎豬腳",
+      closedDays: [],
+      hours: [{ open: "11:00", close: "14:00" }, { open: "16:30", close: "20:30" }],
+      phone: "+886 2 2929 9439",
+      address: "新北市永和區永貞路34號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "滷豬腳、魯肉飯，CP值高"
+    }
+  ],
+  breakfast: [
+    {
+      name: "向日葵早午餐",
+      closedDays: [3],
+      hours: [{ open: "06:00", close: "13:30" }],
+      phone: "+886 2 2232 3751",
+      address: "新北市永和區國中路126號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "週三公休，六日延至13:30"
+    },
+    {
+      name: "元堡早午餐",
+      closedDays: [4],
+      hours: [{ open: "06:10", close: "12:30" }],
+      phone: "+886 2 2232 9973",
+      address: "新北市永和區國中路51號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "週四公休，厚片土司必點"
+    },
+    {
+      name: "享樂老爹肉蛋吐司",
+      closedDays: [2],
+      hours: [{ open: "05:30", close: "13:00" }],
+      phone: "+886 2 8921 3966",
+      address: "新北市永和區國光路26號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "週二公休，肉蛋吐司、玉米濃湯"
+    },
+    {
+      name: "曉食厚Brunch",
+      closedDays: [1],
+      hours: [{ open: "07:00", close: "14:00" }],
+      phone: "+886 2 2921 0831",
+      address: "新北市永和區國光路76號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "週一公休，厚蛋燒、起司薯條"
+    },
+    {
+      name: "紅橘子精緻早午餐",
+      closedDays: [],
+      hours: [{ open: "07:00", close: "17:00" }],
+      phone: "+886 2 2920 9632",
+      address: "新北市永和區永利路6號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "起司蛋糕、蝦仁義大利麵"
+    },
+    {
+      name: "金嘟美食站",
+      closedDays: [3, 5, 0],
+      hours: [{ open: "06:00", close: "19:00" }],
+      phone: "+886 2 2920 2783",
+      address: "新北市永和區福和路57巷14弄2號",
+      mapUrl: "https://maps.app.goo.gl/",
+      note: "週三五日公休，玉米濃湯通心粉"
+    }
+  ]
+};
+
+const COLORS_MEAL = [
+  "#E8D5C4","#F5C4B3","#FAECE7","#C0DD97","#9FE1CB",
+  "#B5D4F4","#F4C0D1","#FAC775","#CECBF6","#9FE1CB",
+  "#F0997B","#B5D4F4","#C0DD97","#F4C0D1","#FAC775",
+  "#CECBF6","#E8D5C4","#F5C4B3"
+];
+const COLORS_BRK = [
+  "#9FE1CB","#FAC775","#F4C0D1","#C0DD97","#B5D4F4","#CECBF6"
+];
+
+let mode = 'meal';
+let removed = [];
+let spinning = false;
+let currentAngle = 0;
+let lastResult = null;
+
+function getActive() {
+  return RESTAURANTS[mode].filter(r => !removed.includes(r.name));
+}
+
+function setMode(m) {
+  mode = m;
+  removed = [];
+  lastResult = null;
+  document.getElementById('tab-meal').classList.toggle('active', m === 'meal');
+  document.getElementById('tab-breakfast').classList.toggle('active', m === 'breakfast');
+  document.getElementById('resultCard').classList.remove('show');
+  document.getElementById('removedList').innerHTML = '';
+  currentAngle = 0;
+  drawWheel(currentAngle);
+}
+
+function drawWheel(rotationAngle) {
+  const canvas = document.getElementById('wheel');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2, r = W / 2 - 2;
+  const items = getActive();
+  const colors = mode === 'meal' ? COLORS_MEAL : COLORS_BRK;
+  ctx.clearRect(0, 0, W, H);
+  if (items.length === 0) {
+    ctx.fillStyle = '#eee';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#888';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('沒有選項了！', cx, cy);
+    return;
+  }
+  const slice = (Math.PI * 2) / items.length;
+  for (let i = 0; i < items.length; i++) {
+    const start = rotationAngle + i * slice - Math.PI / 2;
+    const end = start + slice;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, start, end);
+    ctx.closePath();
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(start + slice / 2);
+    const textR = r * 0.62;
+    ctx.translate(textR, 0);
+    const maxChars = items.length > 10 ? 5 : 7;
+    let label = items[i].name;
+    if (label.length > maxChars) label = label.slice(0, maxChars) + '…';
+    ctx.font = `500 ${items.length > 10 ? 11 : 13}px sans-serif`;
+    ctx.fillStyle = '#2C2C2A';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+  }
+  ctx.beginPath();
+  ctx.arc(cx, cy, 32, 0, Math.PI * 2);
+  ctx.fillStyle = '#fff';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function getWinner(angle) {
+  const items = getActive();
+  if (!items.length) return null;
+  const slice = (Math.PI * 2) / items.length;
+  let norm = ((-angle + Math.PI / 2) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+  const idx = Math.floor(norm / slice) % items.length;
+  return items[idx];
+}
+
+function isOpen(r) {
+  const now = new Date();
+  const day = now.getDay();
+  if (r.closedDays.includes(day)) return false;
+  const hm = now.getHours() * 60 + now.getMinutes();
+  return r.hours.some(slot => {
+    let open = timeToMin(slot.open);
+    let close = timeToMin(slot.close);
+    if (slot.close === "23:59" || slot.close === "00:00") close = 24 * 60;
+    return hm >= open && hm <= close;
+  });
+}
+
+function timeToMin(t) {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function formatHours(r) {
+  const dayNames = ['日','一','二','三','四','五','六'];
+  const closed = r.closedDays.length ? '每週' + r.closedDays.map(d => dayNames[d]).join('、') + '公休' : '無固定公休';
+  const hrs = r.hours.map(s => s.open + '–' + s.close).join('、');
+  return `${closed} ｜ ${hrs}`;
+}
+
+function showResult(r) {
+  lastResult = r;
+  const open = isOpen(r);
+  document.getElementById('resultName').textContent = r.name;
+  const statusEl = document.getElementById('resultStatus');
+  statusEl.textContent = open ? '現在營業中' : '目前休息中';
+  statusEl.className = 'result-status ' + (open ? 'status-open' : 'status-closed');
+
+  document.getElementById('resultInfo').innerHTML =
+    `<div><strong>營業時間：</strong>${formatHours(r)}</div>` +
+    `<div style="margin-top:4px"><strong>電話：</strong>${r.phone}</div>` +
+    `<div style="margin-top:4px"><strong>地址：</strong>${r.address}</div>` +
+    (r.note ? `<div style="margin-top:4px;font-style:italic">${r.note}</div>` : '');
+
+  const actions = document.getElementById('resultActions');
+  actions.innerHTML = '';
+
+  if (!open) {
+    const reBtn = document.createElement('button');
+    reBtn.className = 'action-btn primary';
+    reBtn.textContent = '休息，再轉一次（去掉此店）';
+    reBtn.onclick = () => { removeAndRespin(r.name); };
+    actions.appendChild(reBtn);
+  }
+
+  const skipBtn = document.createElement('button');
+  skipBtn.className = 'action-btn';
+  skipBtn.textContent = '不想吃，再轉一次';
+  skipBtn.onclick = () => { removeAndRespin(r.name); };
+  actions.appendChild(skipBtn);
+
+  const mapBtn = document.createElement('button');
+  mapBtn.className = 'action-btn';
+  mapBtn.textContent = 'Google Maps';
+  mapBtn.onclick = () => {
+    const query = encodeURIComponent(r.name + ' ' + r.address);
+    openLink('https://www.google.com/maps/search/?api=1&query=' + query);
+  };
+  actions.appendChild(mapBtn);
+
+  const okBtn = document.createElement('button');
+  okBtn.className = 'action-btn primary';
+  okBtn.textContent = '就決定是你了！';
+  okBtn.onclick = () => { confetti(); };
+  actions.appendChild(okBtn);
+
+  document.getElementById('resultCard').classList.add('show');
+}
+
+function removeAndRespin(name) {
+  if (!removed.includes(name)) removed.push(name);
+  renderRemovedTags();
+  document.getElementById('resultCard').classList.remove('show');
+  drawWheel(currentAngle);
+  setTimeout(() => spin(), 100);
+}
+
+function renderRemovedTags() {
+  const el = document.getElementById('removedList');
+  el.innerHTML = removed.length ? '已排除：' : '';
+  removed.forEach(n => {
+    const tag = document.createElement('span');
+    tag.className = 'removed-tag';
+    tag.textContent = n;
+    el.appendChild(tag);
+  });
+}
+
+function spin() {
+  if (spinning) return;
+  const items = getActive();
+  if (!items.length) { alert('所有餐廳都已排除了！按分類重選吧～'); return; }
+  spinning = true;
+  document.getElementById('spinBtn').disabled = true;
+  document.getElementById('resultCard').classList.remove('show');
+
+  const extraSpins = (5 + Math.floor(Math.random() * 5)) * Math.PI * 2;
+  const targetIdx = Math.floor(Math.random() * items.length);
+  const slice = (Math.PI * 2) / items.length;
+  const targetAngle = currentAngle + extraSpins + (targetIdx * slice);
+
+  const duration = 3500 + Math.random() * 1000;
+  const start = performance.now();
+  const startAngle = currentAngle;
+
+  function easeOut(t) { return 1 - Math.pow(1 - t, 4); }
+
+  function frame(now) {
+    const elapsed = now - start;
+    const progress = Math.min(elapsed / duration, 1);
+    const easedProgress = easeOut(progress);
+    currentAngle = startAngle + (targetAngle - startAngle) * easedProgress;
+    drawWheel(currentAngle);
+    if (progress < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      currentAngle = targetAngle;
+      drawWheel(currentAngle);
+      spinning = false;
+      document.getElementById('spinBtn').disabled = false;
+      const winner = getWinner(currentAngle);
+      if (winner) showResult(winner);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+function confetti() {
+  const canvas = document.getElementById('wheel');
+  const rect = canvas.getBoundingClientRect();
+  for (let i = 0; i < 30; i++) {
+    setTimeout(() => {
+      const el = document.createElement('div');
+      el.style.cssText = `position:fixed;pointer-events:none;z-index:9999;
+        width:8px;height:8px;border-radius:2px;
+        left:${rect.left + rect.width/2}px;top:${rect.top + rect.height/2}px;
+        background:hsl(${Math.random()*360},70%,60%);
+        transition:transform 1.2s ease-out,opacity 1.2s;
+        opacity:1;`;
+      document.body.appendChild(el);
+      const dx = (Math.random() - 0.5) * 300;
+      const dy = (Math.random() - 1.5) * 200;
+      requestAnimationFrame(() => {
+        el.style.transform = `translate(${dx}px,${dy}px) rotate(${Math.random()*720}deg)`;
+        el.style.opacity = '0';
+      });
+      setTimeout(() => el.remove(), 1400);
+    }, i * 40);
+  }
+}
+
+drawWheel(0);
+</script>
